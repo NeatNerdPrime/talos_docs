@@ -2758,6 +2758,7 @@
               "kubernetes-guides/cni/flannel",
               "kubernetes-guides/cni/deploy-calico",
               "kubernetes-guides/cni/deploying-cilium",
+              "kubernetes-guides/cni/kube-router",
               "kubernetes-guides/cni/multus"
             ]
           },

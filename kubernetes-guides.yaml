@@ -13,6 +13,7 @@ navigation:
             - "flannel.mdx"
             - "deploy-calico.mdx"
             - "deploying-cilium.mdx"
+            - "kube-router.mdx"
             - "multus.mdx"
 
         - group: "CSI"

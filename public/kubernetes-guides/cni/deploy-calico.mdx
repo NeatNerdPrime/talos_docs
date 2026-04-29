@@ -3,18 +3,20 @@ title: "Deploy Calico CNI"
 description: "In this guide you will learn how to set up Calico CNI on Talos in two modes: eBPF and NFTables."
 ---
 
+import { k8s_release } from '/snippets/custom-variables.mdx';
+
 This documentation is designed to get you up and running with Talos and Calico CNI. Since both Calico and Talos support multiple networking technologies, you will learn how to run your environment with both the [Calico eBPF dataplane](https://docs.tigera.io/calico/latest/operations/ebpf/enabling-ebpf) and [NFTables](https://docs.tigera.io/calico/latest/getting-started/kubernetes/nftables). Optionally, you can also enable Calico's network [observability stack](https://docs.tigera.io/calico/latest/observability/) to gain insights into your cluster networking and policy behavior.
 
 ## Configuring Talos
 
 To install Calico, you first need to disable the default CNI. This can be done by applying a patch file during cluster creation.
-Store the following YAML template in a file (`patch.yaml`).
-
-```yaml
+```bash
+cat <<EOF > patch.yaml
 cluster:
   network:
     cni:
       name: none
+EOF
 ```
 
 After generating the patch file add the `--config-patch` argument to your `talosctl gen config`.
@@ -25,19 +27,115 @@ talosctl gen config \
     --config-patch @patch.yaml
 ```
 
+### Installation using Omni
+
+If you are using [Omni](https://www.siderolabs.com/platform/saas-for-kubernetes/), you can deploy Calico using the [manifest sync](../../omni/cluster-management/sync-kubernetes-manifests) feature in a cluster template.
+
+**Step 1.** Download the Tigera operator manifest:
+
+```bash
+curl -Lo tigera-operator.yaml https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml
+```
+
+**Step 2.** Create an `installation.yaml` file with your desired Calico configuration. Choose the dataplane that fits your use case:
+
+<Tabs>
+  <Tab title="NFTables">
+
+```bash
+cat <<EOF > installation.yaml
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    bgp: Disabled
+    linuxDataplane: Nftables
+    ipPools:
+    - name: default-ipv4-ippool
+      blockSize: 26
+      cidr: 10.244.0.0/16
+      encapsulation: VXLAN
+      natOutgoing: Enabled
+      nodeSelector: all()
+  kubeletVolumePluginPath: None
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+EOF
+```
+
+  </Tab>
+  <Tab title="eBPF">
+
+```bash
+cat <<EOF > installation.yaml
+apiVersion: crd.projectcalico.org/v1
+kind: FelixConfiguration
+metadata:
+  name: default
+spec:
+  cgroupV2Path: "/sys/fs/cgroup"
+---
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    bgp: Disabled
+    linuxDataplane: BPF
+    bpfNetworkBootstrap: Enabled
+    kubeProxyManagement: Enabled
+    ipPools:
+    - name: default-ipv4-ippool
+      blockSize: 26
+      cidr: 10.244.0.0/16
+      encapsulation: VXLAN
+      natOutgoing: Enabled
+      nodeSelector: all()
+  kubeletVolumePluginPath: None
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+EOF
+```
+
+  </Tab>
+</Tabs>
+
+**Step 3.** Reference both manifests in your Omni cluster template:
+
+<CodeBlock lang="yaml">
+  {`kind: Cluster\nname: my-cluster\nkubernetes:\n  version: ${k8s_release}\n  manifests:\n    - name: tigera-operator\n      file: tigera-operator.yaml\n      mode: one-time\n    - name: calico-installation\n      file: installation.yaml\n      mode: one-time\npatches:\n  - name: disable-default-cni\n    inline:\n      cluster:\n        network:\n          cni:\n            name: none\n...\n# Include machines for template`}
+</CodeBlock>
+
+**Step 4.** Apply the cluster template:
+
+```bash
+omnictl cluster template sync --file cluster-template.yaml
+```
+
+Omni will wait until the Kubernetes API is available and the cluster is healthy before applying the manifests. See [Sync Kubernetes Manifests](../../omni/cluster-management/sync-kubernetes-manifests) for more details on manifest sync modes and status monitoring.
+
 ## Installing Tigera operator
 
 Recommended way to install Calico is via `Tigera-operator` manifest. The operator will make sure that all Calico components are always up and running.
 
 > **Note:** If you’d like to install Calico using Helm, check out the [Install using Helm documentation](https://docs.tigera.io/calico/latest/getting-started/kubernetes/helm).
 
-Use the following command to install the latest Tigera operator.
+**Step 1.** Install the latest Tigera operator.
 
 ```bash
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml
 ```
 
-### Configuring Calico networking
+### Step 2. Configure Calico networking
 
 Calico has a pluggable dataplane architecture that lets you choose the networking technology based on your use case. You can configure the dataplane by setting the `linuxDataplane` key in the installation manifest.
 
